@@ -2,9 +2,10 @@ import numpy as np
 from scipy.integrate import odeint
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 
 # Funciones f y g dependientes del medicamento y parámetros del paciente
 def funcion_f(C, t, D, V, params, medicamento):
@@ -45,27 +46,24 @@ def ecuaciones(y, t, params, medicamento):
     f = funcion_f(C, t, D, V, params, medicamento)
     g = funcion_g(D, t, params, medicamento)
     
-    # Ajuste de k_e según comorbilidades específicas
+    # Ajuste de k_e según comorbilidades
     k_e = params['k_e']
     
-    # Insuficiencia renal afecta a Metformina y Amoxicilina
     if params['comorbilidad'] == "Insuficiencia renal":
         if medicamento in ["Metformina", "Amoxicilina"]:
-            k_e *= 0.5  # Disminuir k_e en un 50%
+            k_e *= 0.5
     
-    # Insuficiencia hepática afecta a Paracetamol e Ibuprofeno
     if params['comorbilidad'] == "Insuficiencia hepática":
         if medicamento in ["Paracetamol", "Ibuprofeno"]:
-            k_e *= 0.7  # Disminuir k_e en un 30%
+            k_e *= 0.7
     
     dC_dt = f - k_e * C
     dD_dt = -params['k_a'] * g
     dV_dt = params['k_a'] * D - k_e * V
     return [dC_dt, dD_dt, dV_dt]
 
-# Función para calcular el intervalo de dosificación ajustado
+# Función para calcular el intervalo de dosificación
 def calcular_intervalo_dosificacion(params, medicamento):
-    # Intervalos de dosificación base en horas
     intervalos_base = {
         "Ibuprofeno": 6,
         "Paracetamol": 6,
@@ -75,31 +73,26 @@ def calcular_intervalo_dosificacion(params, medicamento):
         "Loratadina": 24
     }
     
-    # Obtener el intervalo base
-    intervalo = intervalos_base.get(medicamento, 8)  # Valor por defecto 8 horas
+    intervalo = intervalos_base.get(medicamento, 8)
 
-    # Ajustes por comorbilidad específica
     if params['comorbilidad'] == "Insuficiencia renal":
         if medicamento in ["Metformina", "Amoxicilina"]:
-            intervalo *= 1.5  # Aumentar el intervalo en un 50%
+            intervalo *= 1.5
 
     if params['comorbilidad'] == "Insuficiencia hepática":
         if medicamento in ["Paracetamol", "Ibuprofeno"]:
-            intervalo *= 1.3  # Aumentar el intervalo en un 30%
+            intervalo *= 1.3
 
-    # Ajustes por genética (metabolismo)
     if params['genetica'] == "Metabolizador rápido":
-        intervalo *= 0.9  # Reducir el intervalo en un 10%
+        intervalo *= 0.9
     elif params['genetica'] == "Metabolizador lento":
-        intervalo *= 1.1  # Aumentar el intervalo en un 10%
+        intervalo *= 1.1
 
-    # Ajustes por masa corporal
     if params['masa'] > 90:
-        intervalo *= 0.95  # Reducir intervalo en un 5%
+        intervalo *= 0.95
     elif params['masa'] < 50:
-        intervalo *= 1.05  # Aumentar intervalo en un 5%
+        intervalo *= 1.05
 
-    # Ajustes por alergias (para Loratadina)
     if medicamento == "Loratadina":
         if params['alergia'] == "Alergia leve":
             intervalo *= 1.1
@@ -108,20 +101,17 @@ def calcular_intervalo_dosificacion(params, medicamento):
         elif params['alergia'] == "Alergia severa":
             intervalo *= 1.3
 
-    # Limitar el intervalo entre 4 y 24 horas
-    intervalo = max(4, min(intervalo, 24))
-    
+    intervalo = max(4, min(intervalo, 48))  # Límite extendido a 48 horas
     return intervalo
 
-# Función para ejecutar la simulación y mostrar las órbitas periódicas
+# Función principal de simulación
 def ejecutar_simulacion():
-    # Obtener los valores ingresados
     try:
         masa = float(entry_masa.get())
         altura = float(entry_altura.get())
         edad = int(entry_edad.get())
     except ValueError:
-        label_intervalo.config(text="Por favor, ingrese valores numéricos válidos.")
+        label_intervalo.config(text="Error: Ingrese valores numéricos válidos.")
         return
 
     genero = genero_var.get()
@@ -130,10 +120,8 @@ def ejecutar_simulacion():
     alergia = alergia_var.get()
     medicamento = medicamento_var.get()
 
-    # Calcular el IMC
     imc = masa / (altura ** 2)
 
-    # Mapear factores de genética y alergia a valores numéricos si es necesario
     genetica_factor = 0.0
     if genetica == "Metabolizador rápido":
         genetica_factor = 0.2
@@ -148,7 +136,6 @@ def ejecutar_simulacion():
     elif alergia == "Alergia severa":
         alergia_factor = 0.3
 
-    # Definir los parámetros del paciente
     params = {
         'masa': masa,
         'altura': altura,
@@ -165,101 +152,109 @@ def ejecutar_simulacion():
         'k_e': 0.3 * (1 - 0.01 * imc)
     }
 
-    # Condiciones iniciales
-    y0 = [0, 100, params['V_d']]
+    # Simulación con múltiples dosis
+    intervalo = calcular_intervalo_dosificacion(params, medicamento)
+    num_dosis = 5  # Número total de dosis
+    puntos_por_dosis = 100  # Resolución temporal
 
-    # Tiempo de simulación (24 horas con más puntos para una animación suave)
-    t = np.linspace(0, 24, 500)
+    t_total = 0
+    t_segmentos = []
+    sol_segmentos = []
+    y0 = [0, 100, params['V_d']]  # Primera dosis
 
-    # Resolver las ecuaciones diferenciales
-    sol = odeint(ecuaciones, y0, t, args=(params, medicamento))
+    for _ in range(num_dosis):
+        t_segmento = np.linspace(t_total, t_total + intervalo, puntos_por_dosis)
+        sol_segmento = odeint(ecuaciones, y0, t_segmento, args=(params, medicamento))
+        
+        t_segmentos.append(t_segmento)
+        sol_segmentos.append(sol_segmento)
+        
+        # Preparar siguiente dosis
+        y0 = sol_segmento[-1, :]
+        y0[1] += 100  # Nueva dosis (100 mg)
+        
+        t_total += intervalo
 
-    # Calcular el intervalo de dosificación
-    intervalo_dosificacion = calcular_intervalo_dosificacion(params, medicamento)
+    # Concatenar resultados
+    t = np.concatenate(t_segmentos)
+    sol = np.concatenate(sol_segmentos, axis=0)
 
-    # Mostrar el intervalo de dosificación
-    label_intervalo.config(text=f"Intervalo de dosificación recomendado: cada {intervalo_dosificacion:.1f} horas")
+    # Mostrar intervalo de dosificación
+    label_intervalo.config(text=f"Intervalo de dosificación: {intervalo:.1f} horas")
 
-    # Crear una nueva ventana para los gráficos
+    # Crear ventana de gráficos 3D
     graph_window = tk.Toplevel(root)
-    graph_window.title(f"Resultados Farmacocinéticos - {medicamento}")
-    graph_window.geometry("1200x700")
+    graph_window.title(f"Farmacocinética 3D - {medicamento}")
+    graph_window.geometry("1200x800")
 
-    # Crear figura para los gráficos
-    fig = plt.figure(figsize=(12, 6), dpi=100)
-    fig.suptitle(f"Simulación Farmacocinética - {medicamento}", fontsize=14)
+    fig = plt.figure(figsize=(12, 8), dpi=100)
+    ax3d = fig.add_subplot(111, projection='3d')
+    
+    ax3d.set_xlabel('Concentración (C)')
+    ax3d.set_ylabel('Volumen (V)')
+    ax3d.set_zlabel('Tiempo (horas)')
+    ax3d.set_title(f'Órbita Farmacocinética 3D - {medicamento}')
+    
+    ax3d.set_xlim(np.min(sol[:,0]), np.max(sol[:,0])*1.1)
+    ax3d.set_ylim(np.min(sol[:,2]), np.max(sol[:,2])*1.1)
+    ax3d.set_zlim(0, t[-1])
 
-    # Gráfico 1: Evolución temporal
-    ax1 = fig.add_subplot(1, 2, 1)
-    line1, = ax1.plot([], [], 'b-', label='Concentración plasmática (C)')
-    line2, = ax1.plot([], [], 'r-', label='Cantidad en tracto digestivo (D)')
-    line3, = ax1.plot([], [], 'g-', label='Volumen de distribución (V)')
-    ax1.set_xlim(0, 24)
-    ax1.set_ylim(0, max(np.max(sol[:,0]), np.max(sol[:,1]), np.max(sol[:,2])) * 1.1)
-    ax1.set_xlabel('Tiempo (horas)')
-    ax1.set_ylabel('Concentración / Cantidad')
-    ax1.set_title('Evolución Temporal')
-    ax1.legend()
-    ax1.grid(True)
+    # Línea 3D y punto actual
+    line3d, = ax3d.plot([], [], [], 'b-', alpha=0.7, linewidth=2)
+    current_point, = ax3d.plot([], [], [], 'ro', markersize=8)
+    
+    # Marcadores de dosis (estrellas verdes)
+    for i in range(num_dosis):
+        ax3d.plot([0], [0], [i*intervalo], 'g*', markersize=10, label=f"Dosis {i+1}" if i == 0 else "")
 
-    # Gráfico 2: Órbitas periódicas
-    ax2 = fig.add_subplot(1, 2, 2)
-    orbit_line, = ax2.plot([], [], 'b-', alpha=0.5)
-    current_point, = ax2.plot([], [], 'ro')
-    ax2.set_xlim(np.min(sol[:,0]) * 1.1, np.max(sol[:,0]) * 1.1)
-    ax2.set_ylim(np.min(sol[:,2]) * 1.1, np.max(sol[:,2]) * 1.1)
-    ax2.set_xlabel('Concentración plasmática (C)')
-    ax2.set_ylabel('Volumen de distribución (V)')
-    ax2.set_title('Órbitas Periódicas en el Espacio de Fases')
-    ax2.grid(True)
+    # Leyenda
+    ax3d.legend()
 
-    # Añadir la figura a la ventana de Tkinter
     canvas = FigureCanvasTkAgg(fig, master=graph_window)
     canvas.draw()
     canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
-    # Función de inicialización para la animación
+    # Animación
     def init():
-        line1.set_data([], [])
-        line2.set_data([], [])
-        line3.set_data([], [])
-        orbit_line.set_data([], [])
+        line3d.set_data([], [])
+        line3d.set_3d_properties([])
         current_point.set_data([], [])
-        return line1, line2, line3, orbit_line, current_point
+        current_point.set_3d_properties([])
+        return line3d, current_point
 
-    # Función de animación
     def animate(i):
-        # Actualizar gráfico temporal
-        line1.set_data(t[:i], sol[:i, 0])
-        line2.set_data(t[:i], sol[:i, 1])
-        line3.set_data(t[:i], sol[:i, 2])
+        line3d.set_data(sol[:i,0], sol[:i,2])
+        line3d.set_3d_properties(t[:i])
         
-        # Actualizar gráfico de órbitas
-        orbit_line.set_data(sol[:i, 0], sol[:i, 2])
-        current_point.set_data(sol[i, 0], sol[i, 2])
+        current_point.set_data([sol[i,0]], [sol[i,2]])
+        current_point.set_3d_properties([t[i]])
         
-        return line1, line2, line3, orbit_line, current_point
+        # Rotación suave
+        ax3d.view_init(elev=20, azim=i/10 % 360)
+        
+        return line3d, current_point
 
-    # Crear la animación
     ani = FuncAnimation(fig, animate, frames=len(t), init_func=init,
                         blit=True, interval=50, repeat=True)
 
-    # Añadir botón para guardar la animación
+    # Botón para guardar animación
     def guardar_animacion():
-        from matplotlib.animation import PillowWriter
-        writer = PillowWriter(fps=15)
-        ani.save("farmacocinetica.gif", writer=writer)
-        tk.messagebox.showinfo("Guardado", "Animación guardada como farmacocinetica.gif")
+        try:
+            from matplotlib.animation import PillowWriter
+            writer = PillowWriter(fps=20)
+            ani.save("farmacocinetica_3d.gif", writer=writer)
+            messagebox.showinfo("Guardado", "Animación guardada como farmacocinetica_3d.gif")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar: {str(e)}")
 
     btn_guardar = ttk.Button(graph_window, text="Guardar Animación", command=guardar_animacion)
     btn_guardar.pack(side=tk.BOTTOM, pady=10)
 
-# Crear la ventana principal de la interfaz
+# Interfaz gráfica
 root = tk.Tk()
-root.title("Calculadora Farmacocinética Avanzada")
-root.geometry("600x650")
+root.title("Simulación Farmacocinética 3D")
+root.geometry("600x700")
 
-# Estilos mejorados
 style = ttk.Style()
 style.theme_use('clam')
 style.configure('TFrame', background='#f0f8ff')
@@ -272,7 +267,7 @@ style.map('TButton', background=[('active', '#3a7ab1')])
 main_frame = ttk.Frame(root, padding="15 15 15 15")
 main_frame.pack(fill=tk.BOTH, expand=True)
 
-# Variables para los campos de entrada
+# Variables de la interfaz
 medicamento_var = tk.StringVar(value="Ibuprofeno")
 genero_var = tk.StringVar(value="Hombre")
 comorbilidad_var = tk.StringVar(value="Sin comorbilidad")
@@ -286,7 +281,7 @@ lista_comorbilidades = ["Sin comorbilidad", "Diabetes", "Insuficiencia renal", "
 lista_genetica = ["Metabolizador normal", "Metabolizador rápido", "Metabolizador lento", "No identificado"]
 lista_alergia = ["Sin alergia", "Alergia leve", "Alergia moderada", "Alergia severa"]
 
-# Crear y colocar widgets de la interfaz
+# Widgets de la interfaz
 ttk.Label(main_frame, text="Datos del Paciente", font=('Arial', 12, 'bold')).grid(row=0, column=0, columnspan=2, pady=10, sticky='w')
 
 row = 1
@@ -330,19 +325,16 @@ medicamento_menu = ttk.OptionMenu(main_frame, medicamento_var, lista_medicamento
 medicamento_menu.grid(row=row, column=1, pady=10, sticky='w')
 row += 1
 
-# Botón para ejecutar la simulación
-btn_simular = ttk.Button(main_frame, text="Ejecutar Simulación", command=ejecutar_simulacion)
+btn_simular = ttk.Button(main_frame, text="Simular en 3D", command=ejecutar_simulacion)
 btn_simular.grid(row=row, column=0, columnspan=2, pady=20)
 row += 1
 
-# Etiqueta para mostrar el intervalo de dosificación
 label_intervalo = ttk.Label(main_frame, text="", foreground='blue', font=('Arial', 12, 'bold'))
 label_intervalo.grid(row=row, column=0, columnspan=2, pady=10)
 
-# Establecer valores por defecto
+# Valores por defecto
 entry_masa.insert(0, "70")
 entry_altura.insert(0, "1.75")
 entry_edad.insert(0, "30")
 
-# Iniciar la aplicación
 root.mainloop()
