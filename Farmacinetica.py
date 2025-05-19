@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.integrate import odeint
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import tkinter as tk
 from tkinter import ttk
 
@@ -166,8 +168,8 @@ def ejecutar_simulacion():
     # Condiciones iniciales
     y0 = [0, 100, params['V_d']]
 
-    # Tiempo de simulación
-    t = np.linspace(0, 24, 1000)
+    # Tiempo de simulación (24 horas con más puntos para una animación suave)
+    t = np.linspace(0, 24, 500)
 
     # Resolver las ecuaciones diferenciales
     sol = odeint(ecuaciones, y0, t, args=(params, medicamento))
@@ -178,42 +180,97 @@ def ejecutar_simulacion():
     # Mostrar el intervalo de dosificación
     label_intervalo.config(text=f"Intervalo de dosificación recomendado: cada {intervalo_dosificacion:.1f} horas")
 
-    # Graficar los resultados
-    plt.figure(figsize=(12, 5))
+    # Crear una nueva ventana para los gráficos
+    graph_window = tk.Toplevel(root)
+    graph_window.title(f"Resultados Farmacocinéticos - {medicamento}")
+    graph_window.geometry("1200x700")
 
-    plt.subplot(1, 2, 1)
-    plt.plot(t, sol[:, 0], label='Concentración plasmática (C)')
-    plt.plot(t, sol[:, 1], label='Cantidad en tracto digestivo (D)')
-    plt.plot(t, sol[:, 2], label='Volumen de distribución (V)')
-    plt.xlabel('Tiempo (horas)')
-    plt.ylabel('Concentración / Cantidad')
-    plt.title(f'Simulación Farmacocinética - {medicamento}')
-    plt.legend()
-    plt.grid(True)
+    # Crear figura para los gráficos
+    fig = plt.figure(figsize=(12, 6), dpi=100)
+    fig.suptitle(f"Simulación Farmacocinética - {medicamento}", fontsize=14)
 
-    plt.subplot(1, 2, 2)
-    plt.plot(sol[:, 0], sol[:, 2], label='Órbitas en el espacio de fases (C vs. V)')
-    plt.xlabel('Concentración plasmática (C)')
-    plt.ylabel('Volumen de distribución (V)')
-    plt.title('Órbitas periódicas en el espacio de fases')
-    plt.grid(True)
-    plt.tight_layout()
+    # Gráfico 1: Evolución temporal
+    ax1 = fig.add_subplot(1, 2, 1)
+    line1, = ax1.plot([], [], 'b-', label='Concentración plasmática (C)')
+    line2, = ax1.plot([], [], 'r-', label='Cantidad en tracto digestivo (D)')
+    line3, = ax1.plot([], [], 'g-', label='Volumen de distribución (V)')
+    ax1.set_xlim(0, 24)
+    ax1.set_ylim(0, max(np.max(sol[:,0]), np.max(sol[:,1]), np.max(sol[:,2])) * 1.1)
+    ax1.set_xlabel('Tiempo (horas)')
+    ax1.set_ylabel('Concentración / Cantidad')
+    ax1.set_title('Evolución Temporal')
+    ax1.legend()
+    ax1.grid(True)
 
-    plt.show()
+    # Gráfico 2: Órbitas periódicas
+    ax2 = fig.add_subplot(1, 2, 2)
+    orbit_line, = ax2.plot([], [], 'b-', alpha=0.5)
+    current_point, = ax2.plot([], [], 'ro')
+    ax2.set_xlim(np.min(sol[:,0]) * 1.1, np.max(sol[:,0]) * 1.1)
+    ax2.set_ylim(np.min(sol[:,2]) * 1.1, np.max(sol[:,2]) * 1.1)
+    ax2.set_xlabel('Concentración plasmática (C)')
+    ax2.set_ylabel('Volumen de distribución (V)')
+    ax2.set_title('Órbitas Periódicas en el Espacio de Fases')
+    ax2.grid(True)
+
+    # Añadir la figura a la ventana de Tkinter
+    canvas = FigureCanvasTkAgg(fig, master=graph_window)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+    # Función de inicialización para la animación
+    def init():
+        line1.set_data([], [])
+        line2.set_data([], [])
+        line3.set_data([], [])
+        orbit_line.set_data([], [])
+        current_point.set_data([], [])
+        return line1, line2, line3, orbit_line, current_point
+
+    # Función de animación
+    def animate(i):
+        # Actualizar gráfico temporal
+        line1.set_data(t[:i], sol[:i, 0])
+        line2.set_data(t[:i], sol[:i, 1])
+        line3.set_data(t[:i], sol[:i, 2])
+        
+        # Actualizar gráfico de órbitas
+        orbit_line.set_data(sol[:i, 0], sol[:i, 2])
+        current_point.set_data(sol[i, 0], sol[i, 2])
+        
+        return line1, line2, line3, orbit_line, current_point
+
+    # Crear la animación
+    ani = FuncAnimation(fig, animate, frames=len(t), init_func=init,
+                        blit=True, interval=50, repeat=True)
+
+    # Añadir botón para guardar la animación
+    def guardar_animacion():
+        from matplotlib.animation import PillowWriter
+        writer = PillowWriter(fps=15)
+        ani.save("farmacocinetica.gif", writer=writer)
+        tk.messagebox.showinfo("Guardado", "Animación guardada como farmacocinetica.gif")
+
+    btn_guardar = ttk.Button(graph_window, text="Guardar Animación", command=guardar_animacion)
+    btn_guardar.pack(side=tk.BOTTOM, pady=10)
 
 # Crear la ventana principal de la interfaz
 root = tk.Tk()
-root.title("Calculadora Farmacocinética")
+root.title("Calculadora Farmacocinética Avanzada")
+root.geometry("600x650")
 
-# Estilos
+# Estilos mejorados
 style = ttk.Style()
-style.configure('TFrame', background='#f0f0f0')
-style.configure('TLabel', background='#f0f0f0', font=('Arial', 12))
-style.configure('TButton', font=('Arial', 12))
-style.configure('TOptionMenu', font=('Arial', 12))
+style.theme_use('clam')
+style.configure('TFrame', background='#f0f8ff')
+style.configure('TLabel', background='#f0f8ff', font=('Arial', 11))
+style.configure('TButton', font=('Arial', 11, 'bold'), background='#4b8bbe', foreground='white')
+style.configure('TEntry', font=('Arial', 11))
+style.configure('TOptionMenu', font=('Arial', 11))
+style.map('TButton', background=[('active', '#3a7ab1')])
 
-main_frame = ttk.Frame(root, padding="10 10 10 10")
-main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+main_frame = ttk.Frame(root, padding="15 15 15 15")
+main_frame.pack(fill=tk.BOTH, expand=True)
 
 # Variables para los campos de entrada
 medicamento_var = tk.StringVar(value="Ibuprofeno")
@@ -230,19 +287,21 @@ lista_genetica = ["Metabolizador normal", "Metabolizador rápido", "Metabolizado
 lista_alergia = ["Sin alergia", "Alergia leve", "Alergia moderada", "Alergia severa"]
 
 # Crear y colocar widgets de la interfaz
-row = 0
+ttk.Label(main_frame, text="Datos del Paciente", font=('Arial', 12, 'bold')).grid(row=0, column=0, columnspan=2, pady=10, sticky='w')
+
+row = 1
 ttk.Label(main_frame, text="Masa (kg):").grid(row=row, column=0, sticky='e', pady=5)
-entry_masa = ttk.Entry(main_frame, width=10)
+entry_masa = ttk.Entry(main_frame, width=15)
 entry_masa.grid(row=row, column=1, pady=5, sticky='w')
 row += 1
 
 ttk.Label(main_frame, text="Altura (m):").grid(row=row, column=0, sticky='e', pady=5)
-entry_altura = ttk.Entry(main_frame, width=10)
+entry_altura = ttk.Entry(main_frame, width=15)
 entry_altura.grid(row=row, column=1, pady=5, sticky='w')
 row += 1
 
 ttk.Label(main_frame, text="Edad (años):").grid(row=row, column=0, sticky='e', pady=5)
-entry_edad = ttk.Entry(main_frame, width=10)
+entry_edad = ttk.Entry(main_frame, width=15)
 entry_edad.grid(row=row, column=1, pady=5, sticky='w')
 row += 1
 
@@ -266,22 +325,19 @@ alergia_menu = ttk.OptionMenu(main_frame, alergia_var, lista_alergia[0], *lista_
 alergia_menu.grid(row=row, column=1, pady=5, sticky='w')
 row += 1
 
-ttk.Label(main_frame, text="Medicamento:").grid(row=row, column=0, sticky='e', pady=5)
+ttk.Label(main_frame, text="Medicamento:", font=('Arial', 11, 'bold')).grid(row=row, column=0, sticky='e', pady=10)
 medicamento_menu = ttk.OptionMenu(main_frame, medicamento_var, lista_medicamentos[0], *lista_medicamentos)
-medicamento_menu.grid(row=row, column=1, pady=5, sticky='w')
+medicamento_menu.grid(row=row, column=1, pady=10, sticky='w')
 row += 1
 
 # Botón para ejecutar la simulación
-ttk.Button(main_frame, text="Ejecutar Simulación", command=ejecutar_simulacion).grid(row=row, column=0, columnspan=2, pady=15)
+btn_simular = ttk.Button(main_frame, text="Ejecutar Simulación", command=ejecutar_simulacion)
+btn_simular.grid(row=row, column=0, columnspan=2, pady=20)
 row += 1
 
 # Etiqueta para mostrar el intervalo de dosificación
 label_intervalo = ttk.Label(main_frame, text="", foreground='blue', font=('Arial', 12, 'bold'))
-label_intervalo.grid(row=row, column=0, columnspan=2, pady=5)
-
-# Ajustar el tamaño de las columnas
-main_frame.columnconfigure(0, weight=1)
-main_frame.columnconfigure(1, weight=2)
+label_intervalo.grid(row=row, column=0, columnspan=2, pady=10)
 
 # Establecer valores por defecto
 entry_masa.insert(0, "70")
